@@ -211,6 +211,8 @@ const S = {master: null, target: null, mFile: null, tFile: null, result: null}
 const ALIASES = {
   品名: ['品名','产品名称','物料名称','名称','物品名称','商品名','产品名'],
   规格: ['规格','规格型号','型号','规格说明','尺寸','参数'],
+  参考料号: ['参考料号','客户料号','客户编码','客户编号','客户物料编码',
+           '客户产品编码','客户物料号','零件号','零件编码','零件编号'],
   料号: ['料号','物料编码','物料编号','编码','产品编码','编号','物料代码','物料号'],
 }
 
@@ -224,13 +226,20 @@ function toast(t) {
   setTimeout(() => e.classList.remove('show'), 2500)
 }
 
-// ═══ 列检测 ═══
+// ═══ 列检测（支持合并标头） ═══
 function detectCols(headers) {
-  const r = {品名: null, 规格: null, 料号: null}
-  for (const [role, as] of Object.entries(ALIASES)) {
-    for (const h of headers) {
-      const hs = String(h).trim()
-      if (as.includes(hs) || as.some(a => hs.includes(a))) { r[role] = hs; break }
+  const r = {品名: null, 规格: null, 参考料号: null, 料号: null}
+  // 按别名长度排序（长匹配优先，防"料号"误配"参考料号"）
+  const sortedRoles = Object.keys(ALIASES).sort(
+    (a,b) => Math.max(...ALIASES[b].map(x=>x.length)) - Math.max(...ALIASES[a].map(x=>x.length)))
+  for (const h of headers) {
+    const hs = String(h).trim()
+    const parts = hs.includes('/') ? hs.split('/').map(s=>s.trim()).filter(Boolean) : [hs]
+    for (const role of sortedRoles) {
+      if (r[role] !== null) continue
+      for (const p of parts) {
+        if (ALIASES[role].includes(p)) { r[role] = hs; break }
+      }
     }
   }
   return r
@@ -364,11 +373,10 @@ async function startMatch() {
   const condStr=condRoles.join('/')||'（无条件）'
   log(`🔍 匹配中（目标: ${targetField} | 条件: ${condStr} | 模糊: ${fuzzyOn?'开':'关'}）`,'hl')
 
-  // 构建索引（针对每个匹配条件）
-  const ni={}  // 品名 -> 目标
-  const si={}  // 品名+规格 -> 目标
-  const ri={}  // 参考料号 -> 目标
+  // 构建索引
+  const ni={}, si={}, ri={}, svi={}  // 品名/规格组合/参考料号/单独规格值
   const mn=mc['品名'], ms=mc['规格'], mr=mc['参考料号']
+  const combinedCol=(tc['规格']&&tc['参考料号']&&tc['规格']===tc['参考料号'])
 
   for(const r of m){
     const n=String(r[mn]||'').trim(), s=String(r[ms]||'').trim()
@@ -376,6 +384,7 @@ async function startMatch() {
     if(n&&c&&condRoles.includes('品名')) ni[n]=c
     if(n&&s&&c&&condRoles.includes('规格')) si[n+'|'+s]=c
     if(ref&&c&&condRoles.includes('参考料号')) ri[ref]=c
+    if(s&&c) svi[s]=c
   }
   const nk=Object.keys(ni)
 
@@ -393,9 +402,13 @@ async function startMatch() {
     if(!code&&condRoles.includes('品名')&&vn&&ni[vn]){code=ni[vn];method='品名匹配'}
     // ② 规格（品名+规格组合）
     if(!code&&condRoles.includes('规格')&&vn&&vs&&si[vn+'|'+vs]){code=si[vn+'|'+vs];method='规格匹配'}
-    // ③ 参考料号
-    if(!code&&condRoles.includes('参考料号')&&vr&&ri[vr]){code=ri[vr];method='参考料号匹配'}
-    // ④ 模糊
+    // ③ 合并列：单独用值试规格
+    if(!code&&combinedCol&&vs&&svi[vs]){code=svi[vs];method='规格匹配'}
+    // ④ 合并列：单独用值试参考料号
+    if(!code&&combinedCol&&vr&&ri[vr]){code=ri[vr];method='参考料号匹配'}
+    // ⑤ 非合并列：参考料号
+    if(!code&&!combinedCol&&condRoles.includes('参考料号')&&vr&&ri[vr]){code=ri[vr];method='参考料号匹配'}
+    // ⑥ 模糊
     if(!code&&fuzzyOn&&condRoles.includes('品名')&&vn&&nk.length){const b=fuzzy(vn,nk);if(b){code=ni[b.match];method=`模糊匹配(${b.score}%)`;fcnt++}}
 
     result.push({row:r,code,method})
