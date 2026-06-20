@@ -116,7 +116,7 @@ body{font-family:'Inter','Noto Sans SC','Segoe UI','Microsoft YaHei',sans-serif;
     <div class="grid-bg"></div>
     <h1>📦 料号自动匹配器</h1>
     <p>从总档案中自动匹配料号 — 全部在浏览器中完成，数据不上传</p>
-    <span class="rule">品名 → 规格 → 模糊匹配</span>
+    <span class="rule">支持选择目标字段和匹配条件</span>
   </div>
 
   <!-- 总档案 -->
@@ -151,10 +151,35 @@ body{font-family:'Inter','Noto Sans SC','Segoe UI','Microsoft YaHei',sans-serif;
 
   <!-- 设置 -->
   <div class="card">
+    <div style="margin-bottom:10px;font-weight:600;font-size:14px;color:#333">⚙ 设置</div>
+
+    <!-- 目标字段 -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <span style="font-size:13px;color:#555">🎯 目标字段：</span>
+      <select id="targetSelect" style="padding:4px 10px;border-radius:6px;border:1px solid #d0d5e0;font-size:13px;background:#fff">
+        <option value="料号">料号</option>
+        <option value="品名">品名</option>
+        <option value="规格">规格</option>
+        <option value="参考料号">参考料号</option>
+      </select>
+      <span style="font-size:12px;color:#999">（要填充的是哪个字段）</span>
+    </div>
+
+    <!-- 匹配条件 -->
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+      <span style="font-size:13px;color:#555">🔍 匹配条件：</span>
+      <label class="setting-label" style="font-size:13px"><input type="checkbox" id="cond_品名" checked onchange="syncConds()"> 品名</label>
+      <label class="setting-label" style="font-size:13px"><input type="checkbox" id="cond_规格" checked onchange="syncConds()"> 规格</label>
+      <label class="setting-label" style="font-size:13px"><input type="checkbox" id="cond_参考料号" checked onchange="syncConds()"> 参考料号</label>
+      <label class="setting-label" style="font-size:13px"><input type="checkbox" id="cond_料号" checked onchange="syncConds()"> 料号</label>
+      <span style="font-size:12px;color:#999">（用哪些字段去匹配）</span>
+    </div>
+
+    <!-- 模糊匹配 -->
     <div class="settings">
       <label class="switch"><input type="checkbox" id="fuzzySwitch"><span class="slider"></span></label>
       <label class="setting-label" for="fuzzySwitch">启用模糊匹配</label>
-      <span class="setting-note">品名/规格对不上时按相似度自动匹配</span>
+      <span class="setting-note">条件对不上时按相似度自动匹配</span>
     </div>
   </div>
 
@@ -261,6 +286,32 @@ function checkReady() {
   document.getElementById('matchBtn').disabled = !(S.master && S.target)
 }
 
+// 同步条件：目标变更时自动取消勾选自身
+function syncConds() {
+  const target = document.getElementById('targetSelect').value
+  const roles = ['品名','规格','参考料号','料号']
+  // 先确保至少有一个条件被勾选
+  const checked = roles.filter(r => document.getElementById('cond_'+r).checked)
+  const targetChecked = document.getElementById('cond_'+target).checked
+
+  if (targetChecked) {
+    document.getElementById('cond_'+target).checked = false
+  }
+  // 如果全部取消了，恢复其他条件
+  const after = roles.filter(r => document.getElementById('cond_'+r).checked)
+  if (after.length === 0) {
+    for (const r of roles) {
+      if (r !== target) document.getElementById('cond_'+r).checked = true
+    }
+  }
+}
+
+// 目标变更时同步
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('targetSelect').addEventListener('change', syncConds)
+  syncConds()
+})
+
 // ═══ 模糊匹配 ═══
 function levenshtein(a, b) {
   const m=a.length,n=b.length; const d=Array.from({length:m+1},()=>Array(n+1).fill(0))
@@ -291,29 +342,40 @@ async function startMatch() {
   document.getElementById('resultBox').classList.remove('show')
   const pw=document.getElementById('progressWrap'); pw.style.display='block'
   document.getElementById('progressBar').style.width='0%'
-
-  // 让 UI 更新
   await new Promise(r=>setTimeout(r,50))
 
   const m=S.master, t=S.target, mh=Object.keys(m[0]), th=Object.keys(t[0])
   const mc=detectCols(mh), tc=detectCols(th)
-  const mn=mc['品名'], ms=mc['规格'], mcode=mc['料号']
-  const tn=tc['品名'], ts=tc['规格'], tcode=tc['料号']||'料号'
+  const targetField=document.getElementById('targetSelect').value
 
   log('📋 字段检测:','hl')
   for(const[r,c]of Object.entries(mc)) log(`  总档案 ${c?'✓':'✗'} ${r}: ${c||'未找到'}`)
   for(const[r,c]of Object.entries(tc)) log(`  待匹配 ${c?'✓':'✗'} ${r}: ${c||'未找到'}`)
-  if(!mcode){toast('⚠️ 总档案中未找到料号列');btn.disabled=false;btn.textContent='🚀 开始匹配';return}
-  log('')
-  const fuzzyOn=document.getElementById('fuzzySwitch').checked
-  log(`🔍 匹配中（模糊: ${fuzzyOn?'开':'关'}）`,'hl')
 
-  // 索引
-  const ni={}, si={}
+  // 检查目标字段
+  const mTargetCol=mc[targetField]
+  if(!mTargetCol){toast('⚠️ 总档案中未找到「'+targetField+'」列');btn.disabled=false;btn.textContent='🚀 开始匹配';return}
+  log('')
+
+  // 读取选中的匹配条件
+  const allRoles=['品名','规格','参考料号','料号']
+  const condRoles=allRoles.filter(r=>document.getElementById('cond_'+r).checked)
+  const fuzzyOn=document.getElementById('fuzzySwitch').checked
+  const condStr=condRoles.join('/')||'（无条件）'
+  log(`🔍 匹配中（目标: ${targetField} | 条件: ${condStr} | 模糊: ${fuzzyOn?'开':'关'}）`,'hl')
+
+  // 构建索引（针对每个匹配条件）
+  const ni={}  // 品名 -> 目标
+  const si={}  // 品名+规格 -> 目标
+  const ri={}  // 参考料号 -> 目标
+  const mn=mc['品名'], ms=mc['规格'], mr=mc['参考料号']
+
   for(const r of m){
-    const n=String(r[mn]||'').trim(), s=String(r[ms]||'').trim(), c=String(r[mcode]||'').trim()
-    if(n&&c) ni[n]=c
-    if(n&&s&&c) si[n+'|'+s]=c
+    const n=String(r[mn]||'').trim(), s=String(r[ms]||'').trim()
+    const ref=String(r[mr]||'').trim(), c=String(r[mTargetCol]||'').trim()
+    if(n&&c&&condRoles.includes('品名')) ni[n]=c
+    if(n&&s&&c&&condRoles.includes('规格')) si[n+'|'+s]=c
+    if(ref&&c&&condRoles.includes('参考料号')) ri[ref]=c
   }
   const nk=Object.keys(ni)
 
@@ -321,11 +383,21 @@ async function startMatch() {
   let mcnt=0, fcnt=0, ncnt=0
   const total=t.length, result=[]
   for(let i=0;i<total;i++){
-    const r=t[i], vn=String(r[tn]||'').trim(), vs=String(r[ts]||'').trim()
+    const r=t[i]
+    const vn=String(r[tc['品名']||'']||'').trim()
+    const vs=String(r[tc['规格']||'']||'').trim()
+    const vr=String(r[tc['参考料号']||'']||'').trim()
     let code='', method=''
-    if(!code&&vn&&ni[vn]){code=ni[vn];method='品名匹配'}
-    if(!code&&vn&&vs&&si[vn+'|'+vs]){code=si[vn+'|'+vs];method='规格匹配'}
-    if(!code&&fuzzyOn&&vn&&nk.length){const b=fuzzy(vn,nk);if(b){code=ni[b.match];method=`模糊匹配(${b.score}%)`;fcnt++}}
+
+    // ① 品名精确
+    if(!code&&condRoles.includes('品名')&&vn&&ni[vn]){code=ni[vn];method='品名匹配'}
+    // ② 规格（品名+规格组合）
+    if(!code&&condRoles.includes('规格')&&vn&&vs&&si[vn+'|'+vs]){code=si[vn+'|'+vs];method='规格匹配'}
+    // ③ 参考料号
+    if(!code&&condRoles.includes('参考料号')&&vr&&ri[vr]){code=ri[vr];method='参考料号匹配'}
+    // ④ 模糊
+    if(!code&&fuzzyOn&&condRoles.includes('品名')&&vn&&nk.length){const b=fuzzy(vn,nk);if(b){code=ni[b.match];method=`模糊匹配(${b.score}%)`;fcnt++}}
+
     result.push({row:r,code,method})
     if(code) mcnt++; else ncnt++
     if(i%Math.max(1,Math.floor(total/50))===0) document.getElementById('progressBar').style.width=Math.round((i/total)*100)+'%'
@@ -351,7 +423,8 @@ async function startMatch() {
 function downloadResult() {
   if(!S.result||!S.target) return
   const t=S.target, tc=detectCols(Object.keys(t[0]))
-  const codeCol=tc['料号']||'料号'
+  const targetField=document.getElementById('targetSelect').value
+  const codeCol=tc[targetField]||targetField
   const headers=Object.keys(t[0])
   const codeIdx=headers.indexOf(codeCol)
 
