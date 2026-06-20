@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>料号自动匹配器</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter','Noto Sans SC','Segoe UI','Microsoft YaHei',sans-serif;background:linear-gradient(160deg,#f4f6fb 0%,#eef1f7 50%,#e8ecf4 100%);min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:32px 20px}
+.container{max-width:680px;width:100%;margin:0 auto}
+
+/* 标题 */
+.header{background:linear-gradient(135deg,#435ebe,#3451a1);border-radius:16px;padding:28px 32px;color:#fff;margin-bottom:24px;box-shadow:0 8px 32px rgba(67,94,190,.25);position:relative;overflow:hidden}
+.header::before{content:'';position:absolute;top:-60%;right:-15%;width:280px;height:280px;background:radial-gradient(circle,rgba(255,255,255,.06) 0%,transparent 70%);border-radius:50%}
+.header::after{content:'';position:absolute;bottom:-40%;left:-5%;width:200px;height:200px;background:radial-gradient(circle,rgba(255,255,255,.04) 0%,transparent 70%);border-radius:50%}
+.header .grid-bg{position:absolute;inset:0;opacity:.03;background-image:linear-gradient(rgba(255,255,255,.3) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.3) 1px,transparent 1px);background-size:32px 32px;pointer-events:none}
+.header h1{font-size:24px;font-weight:700;position:relative;z-index:1}
+.header p{font-size:13px;opacity:.85;margin-top:4px;position:relative;z-index:1;font-weight:400}
+.header .rule{display:inline-block;background:rgba(255,255,255,.12);border-radius:20px;padding:3px 14px;font-size:12px;margin-top:10px;position:relative;z-index:1;border:1px solid rgba(255,255,255,.08)}
+
+/* 卡片 */
+.card{background:#fff;border-radius:14px;padding:20px 24px;margin-bottom:14px;box-shadow:0 2px 12px rgba(0,0,0,.06);transition:transform .2s,box-shadow .2s}
+.card:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(0,0,0,.1)}
+.card-title{font-weight:600;font-size:14px;margin-bottom:8px;color:#333}
+.card-title small{font-weight:400;color:#999;font-size:12px}
+
+/* 拖拽区 */
+.drop-zone{border:2px dashed #d0d5e0;border-radius:12px;padding:24px;text-align:center;cursor:pointer;transition:all .3s;background:#fafbfc;position:relative}
+.drop-zone:hover{border-color:#435ebe;background:#f0f4ff}
+.drop-zone.dragover{border-color:#435ebe;background:#e8eeff;transform:scale(1.01);box-shadow:0 0 0 4px rgba(67,94,190,.1)}
+.drop-zone .icon{font-size:36px;margin-bottom:6px;display:block}
+.drop-zone .text{color:#666;font-size:14px}
+.drop-zone .text strong{color:#435ebe}
+.drop-zone .hint{color:#999;font-size:12px;margin-top:4px}
+
+/* 文件信息 */
+.file-info{display:none;padding:10px 14px;background:#f0f7ff;border-radius:8px;margin-top:12px;font-size:13px;color:#333;text-align:left;border:1px solid #d4e4ff;animation:slideIn .3s ease}
+.file-info.show{display:block}
+.file-info .fname{font-weight:600;color:#435ebe}
+.file-info .fdetail{color:#666;font-size:12px;margin-top:2px}
+.file-info .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.tag{padding:2px 10px;border-radius:12px;font-size:11px;font-weight:500}
+.tag-ok{background:#e6f7ef;color:#1a8a68}
+.tag-miss{background:#fff0f0;color:#cc3333}
+.drop-zone.loaded{border-color:#20c997;background:#f0faf5;border-style:solid}
+@keyframes slideIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+
+/* 设置 */
+.settings{display:flex;align-items:center;gap:10px;padding:4px 0;flex-wrap:wrap}
+.setting-label{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;color:#444}
+.switch{position:relative;width:40px;height:22px;flex-shrink:0}
+.switch input{opacity:0;width:0;height:0}
+.switch .slider{position:absolute;inset:0;background:#ccc;border-radius:22px;transition:.3s;cursor:pointer}
+.switch .slider::before{content:'';position:absolute;width:18px;height:18px;left:2px;bottom:2px;background:#fff;border-radius:50%;transition:.3s}
+.switch input:checked+.slider{background:#435ebe}
+.switch input:checked+.slider::before{transform:translateX(18px)}
+.setting-note{color:#999;font-size:12px}
+
+/* 按钮 */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:12px 36px;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:all .3s}
+.btn-primary{background:linear-gradient(135deg,#435ebe,#3a4f9e);color:#fff;box-shadow:0 4px 14px rgba(67,94,190,.3)}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(67,94,190,.4)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn-success{background:linear-gradient(135deg,#20c997,#1baa7e);color:#fff;box-shadow:0 4px 14px rgba(32,201,151,.3)}
+.btn-success:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(32,201,151,.4)}
+.btn-center{display:flex;justify-content:center;margin:16px 0}
+
+/* 进度 */
+.progress-wrap{height:6px;background:#e8ecf4;border-radius:3px;overflow:hidden;margin:10px 0;display:none}
+.progress-bar{height:100%;width:0%;background:linear-gradient(90deg,#435ebe,#20c997);border-radius:3px;transition:width .4s ease}
+
+/* 日志 */
+.log-area{background:#f8f9fc;border-radius:10px;padding:14px 16px;font-size:13px;line-height:1.7;max-height:180px;overflow-y:auto;color:#555;font-family:Consolas,'Courier New',monospace;min-height:56px}
+.log-area .hl{color:#435ebe;font-weight:600}
+.log-area .ok{color:#20c997;font-weight:600}
+.log-area .err{color:#e74c3c;font-weight:600}
+
+/* 结果 */
+.result-box{display:none;background:linear-gradient(135deg,#f0faf5,#e8f5ee);border-radius:12px;padding:20px;margin-top:12px;border:1px solid #b8e6d4;animation:fadeIn .4s ease}
+.result-box.show{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.rgrid{display:flex;gap:24px;justify-content:center;margin:12px 0}
+.ritem{text-align:center}
+.ritem .num{font-size:28px;font-weight:700;color:#435ebe}
+.ritem .num.g{color:#20c997}
+.ritem .num.r{color:#e74c3c}
+.ritem .lbl{font-size:12px;color:#888;margin-top:2px}
+.rdl{text-align:center;margin-top:14px}
+
+/* Toast */
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%) translateY(-80px);background:#333;color:#fff;padding:12px 24px;border-radius:10px;font-size:14px;z-index:999;opacity:0;transition:all .4s ease;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+@media(max-width:500px){
+  body{padding:16px}
+  .header{padding:20px;border-radius:12px}
+  .header h1{font-size:20px}
+  .card{padding:16px}
+  .drop-zone{padding:18px}
+  .drop-zone .icon{font-size:28px}
+  .rgrid{gap:12px}
+  .ritem .num{font-size:22px}
+}
+</style>
+</head>
+<body>
+<div class="toast" id="toast"></div>
+<div class="container">
+
+  <div class="header">
+    <div class="grid-bg"></div>
+    <h1>📦 料号自动匹配器</h1>
+    <p>从总档案中自动匹配料号 — 全部在浏览器中完成，数据不上传</p>
+    <span class="rule">品名 → 规格 → 模糊匹配</span>
+  </div>
+
+  <!-- 总档案 -->
+  <div class="card">
+    <div class="card-title">📂 总档案文件 <small>（含完整的料号信息）</small></div>
+    <div class="drop-zone" id="masterZone">
+      <span class="icon">📁</span>
+      <div class="text">拖拽文件到这里，或 <strong>点击选择</strong></div>
+      <div class="hint">支持 .xlsx / .xls / .csv</div>
+      <div class="file-info" id="masterInfo">
+        <div class="fname" id="masterName"></div>
+        <div class="fdetail" id="masterDetail"></div>
+        <div class="tags" id="masterTags"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 待匹配 -->
+  <div class="card">
+    <div class="card-title">📂 待匹配文件 <small>（需要补料号的清单）</small></div>
+    <div class="drop-zone" id="targetZone">
+      <span class="icon">📁</span>
+      <div class="text">拖拽文件到这里，或 <strong>点击选择</strong></div>
+      <div class="hint">支持 .xlsx / .xls / .csv</div>
+      <div class="file-info" id="targetInfo">
+        <div class="fname" id="targetName"></div>
+        <div class="fdetail" id="targetDetail"></div>
+        <div class="tags" id="targetTags"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 设置 -->
+  <div class="card">
+    <div class="settings">
+      <label class="switch"><input type="checkbox" id="fuzzySwitch"><span class="slider"></span></label>
+      <label class="setting-label" for="fuzzySwitch">启用模糊匹配</label>
+      <span class="setting-note">品名/规格对不上时按相似度自动匹配</span>
+    </div>
+  </div>
+
+  <!-- 进度条 -->
+  <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
+
+  <!-- 按钮 -->
+  <div class="btn-center"><button class="btn btn-primary" id="matchBtn" onclick="startMatch()" disabled>🚀 开始匹配</button></div>
+
+  <!-- 日志 + 结果 -->
+  <div class="card">
+    <div class="card-title">📋 匹配结果</div>
+    <div class="log-area" id="logArea">📦 请选择总档案和待匹配文件</div>
+    <div class="result-box" id="resultBox">
+      <div class="rgrid">
+        <div class="ritem"><div class="num" id="rTotal">0</div><div class="lbl">总条数</div></div>
+        <div class="ritem"><div class="num g" id="rMatched">0</div><div class="lbl">匹配成功</div></div>
+        <div class="ritem"><div class="num" id="rFuzzy" style="color:#f39c12">0</div><div class="lbl">模糊匹配</div></div>
+        <div class="ritem"><div class="num r" id="rNoMatch">0</div><div class="lbl">未匹配</div></div>
+      </div>
+      <div class="rdl"><button class="btn btn-success" id="downloadBtn" onclick="downloadResult()">📥 下载结果</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══ 全局 ═══
+const S = {master: null, target: null, mFile: null, tFile: null, result: null}
+const ALIASES = {
+  品名: ['品名','产品名称','物料名称','名称','物品名称','商品名','产品名'],
+  规格: ['规格','规格型号','型号','规格说明','尺寸','参数'],
+  料号: ['料号','物料编码','物料编号','编码','产品编码','编号','物料代码','物料号'],
+}
+
+function log(m, c='') {
+  const el = document.getElementById('logArea')
+  if (el.innerHTML === '📦 请选择总档案和待匹配文件') el.innerHTML = ''
+  el.innerHTML += `<div class="${c}">${m}</div>`; el.scrollTop = el.scrollHeight
+}
+function toast(t) {
+  const e = document.getElementById('toast'); e.textContent = t; e.classList.add('show')
+  setTimeout(() => e.classList.remove('show'), 2500)
+}
+
+// ═══ 列检测 ═══
+function detectCols(headers) {
+  const r = {品名: null, 规格: null, 料号: null}
+  for (const [role, as] of Object.entries(ALIASES)) {
+    for (const h of headers) {
+      const hs = String(h).trim()
+      if (as.includes(hs) || as.some(a => hs.includes(a))) { r[role] = hs; break }
+    }
+  }
+  return r
+}
+
+// ═══ 拖拽 ═══
+function setupDnD(zid, cb) {
+  const z = document.getElementById(zid)
+  z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('dragover') })
+  z.addEventListener('dragleave', () => z.classList.remove('dragover'))
+  z.addEventListener('drop', e => {
+    e.preventDefault(); z.classList.remove('dragover')
+    if (e.dataTransfer.files.length) cb(e.dataTransfer.files[0])
+  })
+  z.addEventListener('click', () => {
+    const inp = document.createElement('input')
+    inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv'
+    inp.onchange = e => { if (e.target.files[0]) cb(e.target.files[0]) }
+    inp.click()
+  })
+}
+
+setupDnD('masterZone', f => loadFile('master', f))
+setupDnD('targetZone', f => loadFile('target', f))
+
+async function loadFile(type, file) {
+  const ext = file.name.split('.').pop().toLowerCase()
+  if (!['xlsx','xls','csv'].includes(ext)) { toast('⚠️ 仅支持 Excel/CSV 文件'); return }
+  try {
+    const data = await file.arrayBuffer()
+    const wb = XLSX.read(data, {type: 'array'})
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    const json = XLSX.utils.sheet_to_json(ws, {defval: ''})
+    if (!json.length) { toast('⚠️ 文件为空'); return }
+
+    const cols = detectCols(Object.keys(json[0]))
+    const isM = type === 'master'
+    const z = document.getElementById(isM ? 'masterZone' : 'targetZone')
+    document.getElementById(isM ? 'masterName' : 'targetName').textContent = file.name
+    document.getElementById(isM ? 'masterDetail' : 'targetDetail').textContent = `${json.length} 条数据`
+    document.getElementById(isM ? 'masterTags' : 'targetTags').innerHTML =
+      Object.entries(cols).map(([r,c]) => `<span class="tag ${c?'tag-ok':'tag-miss'}">${r}${c?': '+c:' ✗'}</span>`).join('')
+    document.getElementById(isM ? 'masterInfo' : 'targetInfo').classList.add('show')
+    z.classList.add('loaded')
+
+    S[type] = json; S[type==='master'?'mFile':'tFile'] = file
+    log(`📄 ${type==='master'?'总档案':'待匹配'}: ${file.name} (${json.length} 条)`)
+    checkReady()
+  } catch(e) { toast('⚠️ 文件读取失败: '+e.message) }
+}
+
+function checkReady() {
+  document.getElementById('matchBtn').disabled = !(S.master && S.target)
+}
+
+// ═══ 模糊匹配 ═══
+function levenshtein(a, b) {
+  const m=a.length,n=b.length; const d=Array.from({length:m+1},()=>Array(n+1).fill(0))
+  for(let i=0;i<=m;i++) d[i][0]=i
+  for(let j=0;j<=n;j++) d[0][j]=j
+  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++)
+    d[i][j]=a[i-1]===b[j-1]?d[i-1][j-1]:1+Math.min(d[i-1][j],d[i][j-1],d[i-1][j-1])
+  return d[m][n]
+}
+function sim(a,b) {
+  if(!a||!b) return 0; a=String(a).trim(); b=String(b).trim()
+  if(a===b) return 100
+  const d=levenshtein(a,b); return Math.round((1-d/Math.max(a.length,b.length))*100)
+}
+function fuzzy(txt, candidates, thr=70) {
+  let best={score:0,match:'',idx:-1}
+  for(let i=0;i<candidates.length;i++) {
+    const s=sim(txt,candidates[i])
+    if(s>best.score) best={score:s,match:candidates[i],idx:i}
+  }
+  return best.score>=thr?best:null
+}
+
+// ═══ 执行匹配 ═══
+async function startMatch() {
+  if(!S.master||!S.target) return
+  const btn=document.getElementById('matchBtn'); btn.disabled=true; btn.textContent='⏳ 匹配中...'
+  document.getElementById('resultBox').classList.remove('show')
+  const pw=document.getElementById('progressWrap'); pw.style.display='block'
+  document.getElementById('progressBar').style.width='0%'
+
+  // 让 UI 更新
+  await new Promise(r=>setTimeout(r,50))
+
+  const m=S.master, t=S.target, mh=Object.keys(m[0]), th=Object.keys(t[0])
+  const mc=detectCols(mh), tc=detectCols(th)
+  const mn=mc['品名'], ms=mc['规格'], mcode=mc['料号']
+  const tn=tc['品名'], ts=tc['规格'], tcode=tc['料号']||'料号'
+
+  log('📋 字段检测:','hl')
+  for(const[r,c]of Object.entries(mc)) log(`  总档案 ${c?'✓':'✗'} ${r}: ${c||'未找到'}`)
+  for(const[r,c]of Object.entries(tc)) log(`  待匹配 ${c?'✓':'✗'} ${r}: ${c||'未找到'}`)
+  if(!mcode){toast('⚠️ 总档案中未找到料号列');btn.disabled=false;btn.textContent='🚀 开始匹配';return}
+  log('')
+  const fuzzyOn=document.getElementById('fuzzySwitch').checked
+  log(`🔍 匹配中（模糊: ${fuzzyOn?'开':'关'}）`,'hl')
+
+  // 索引
+  const ni={}, si={}
+  for(const r of m){
+    const n=String(r[mn]||'').trim(), s=String(r[ms]||'').trim(), c=String(r[mcode]||'').trim()
+    if(n&&c) ni[n]=c
+    if(n&&s&&c) si[n+'|'+s]=c
+  }
+  const nk=Object.keys(ni)
+
+  // 逐行匹配
+  let mcnt=0, fcnt=0, ncnt=0
+  const total=t.length, result=[]
+  for(let i=0;i<total;i++){
+    const r=t[i], vn=String(r[tn]||'').trim(), vs=String(r[ts]||'').trim()
+    let code='', method=''
+    if(!code&&vn&&ni[vn]){code=ni[vn];method='品名匹配'}
+    if(!code&&vn&&vs&&si[vn+'|'+vs]){code=si[vn+'|'+vs];method='规格匹配'}
+    if(!code&&fuzzyOn&&vn&&nk.length){const b=fuzzy(vn,nk);if(b){code=ni[b.match];method=`模糊匹配(${b.score}%)`;fcnt++}}
+    result.push({row:r,code,method})
+    if(code) mcnt++; else ncnt++
+    if(i%Math.max(1,Math.floor(total/50))===0) document.getElementById('progressBar').style.width=Math.round((i/total)*100)+'%'
+  }
+  document.getElementById('progressBar').style.width='100%'
+
+  log(''); log('━'.repeat(40),'')
+  log(`  ✅ 匹配完成`,'ok')
+  log(`  📊 ${total}条 | 匹配${mcnt}条${fuzzyOn?' | 模糊'+fcnt+'条':''}${ncnt?' | ⚠ 未匹配'+ncnt+'条':''}`,'')
+  log('━'.repeat(40),'')
+
+  document.getElementById('rTotal').textContent=total
+  document.getElementById('rMatched').textContent=mcnt
+  document.getElementById('rFuzzy').textContent=fcnt
+  document.getElementById('rNoMatch').textContent=ncnt
+  document.getElementById('resultBox').classList.add('show')
+  S.result=result
+  toast(`✅ 完成！${total}条匹配${mcnt}条`)
+  btn.disabled=false; btn.textContent='🚀 开始匹配'
+}
+
+// ═══ 下载（带颜色） ═══
+function downloadResult() {
+  if(!S.result||!S.target) return
+  const t=S.target, tc=detectCols(Object.keys(t[0]))
+  const codeCol=tc['料号']||'料号'
+  const headers=Object.keys(t[0])
+  const codeIdx=headers.indexOf(codeCol)
+
+  // 准备行数据 + 匹配方式列（用于颜色标记）
+  const sheetRows=[...headers,'匹配方式']
+  const rows=[sheetRows]
+  for(let i=0;i<t.length;i++){
+    const row={...t[i]}; const info=S.result[i]
+    if(info&&info.code) row[codeCol]=info.code
+    rows.push([...Object.values(row), info?info.method:''])
+  }
+
+  // 用 SheetJS 写基础 xlsx
+  const ws=XLSX.utils.aoa_to_sheet(rows)
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Sheet1')
+  const wbdata=XLSX.write(wb,{bookType:'xlsx',type:'array'})
+
+  // 用 JSZip 解压并改样式
+  JSZip.loadAsync(wbdata).then(zip=>{
+    return Promise.all([
+      zip.file('xl/styles.xml').async('string'),
+      zip.file('xl/worksheets/sheet1.xml').async('string')
+    ]).then(([stylesXml, sheetXml])=>{
+      // 修改 styles.xml: 添加蓝/红色字体
+      let s = stylesXml
+      // 添加字体（索引2=蓝，3=红）
+      s = s.replace('</fonts>',
+        `<font><sz val="11"/><name val="Calibri"/><color rgb="FF0066CC"/></font>`+
+        `<font><sz val="11"/><name val="Calibri"/><color rgb="FFCC0000"/></font></fonts>`)
+      // 更新 cellXfs 数量
+      const xfMatch = s.match(/<cellXfs[^>]*>/)
+      if(xfMatch){
+        // 保留原0号样式，新增3个：0=默认 1=默认 2=蓝 3=红
+        s = s.replace(/<cellXfs[^>]*>[\s\S]*?<\/cellXfs>/,
+          `<cellXfs count="4">`+
+          `<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>`+
+          `<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>`+
+          `<xf numFmtId="0" fontId="2" fillId="0" borderId="0"/>`+
+          `<xf numFmtId="0" fontId="3" fillId="0" borderId="0"/>`+
+          `</cellXfs>`)
+      }
+
+      // 修改 sheet: 给料号列加样式
+      const parser=new DOMParser()
+      const doc=parser.parseFromString(sheetXml,'text/xml')
+      const xrows=doc.querySelectorAll('row')
+      for(let i=1;i<xrows.length;i++){
+        const info=S.result[i-1]
+        if(!info||!info.method) continue
+        let sId=0
+        if(info.method.includes('规格')) sId=2
+        else if(info.method.includes('模糊')) sId=3
+        else continue
+
+        const cells=xrows[i].querySelectorAll('c')
+        for(const c of cells){
+          const ref=c.getAttribute('r')||''
+          const col=ref.replace(/[0-9]/g,'')
+          const ci=col.charCodeAt(0)-65
+          if(ci===codeIdx) c.setAttribute('s',String(sId))
+        }
+      }
+      const sheetStr=new XMLSerializer().serializeToString(doc)
+
+      return zip.file('xl/styles.xml', s)
+            .file('xl/worksheets/sheet1.xml', sheetStr)
+    }).then(()=>zip.generateAsync({type:'blob'}))
+  }).then(blob=>{
+    const name=(S.tFile?S.tFile.name.replace(/\.[^.]+$/,''):'结果')+'_已补料号.xlsx'
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name
+    a.click(); URL.revokeObjectURL(a.href)
+    document.getElementById('downloadBtn').textContent='✅ 已下载'
+    setTimeout(()=>document.getElementById('downloadBtn').textContent='📥 下载结果',2000)
+  }).catch(e=>{
+    console.error(e); toast('⚠️ 下载失败，尝试无颜色版本')
+    // 降级方案
+    const ws2=XLSX.utils.aoa_to_sheet(rows.map(r=>r.slice(0,-1)))
+    const wb2=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb2,ws2,'Sheet1')
+    const name=(S.tFile?S.tFile.name.replace(/\.[^.]+$/,''):'结果')+'_已补料号.xlsx'
+    XLSX.writeFile(wb2,name)
+    document.getElementById('downloadBtn').textContent='✅ 已下载'
+  })
+}
+
+// 初始
+log('📦 料号自动匹配器 网页版')
+log('⇩ 拖拽或点击选择两个 Excel 文件')
+log('💡 数据完全在本地处理，不上传服务器')
+</script>
+</body>
+</html>
