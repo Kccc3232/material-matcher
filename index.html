@@ -463,31 +463,50 @@ function downloadResult() {
       zip.file('xl/styles.xml').async('string'),
       zip.file('xl/worksheets/sheet1.xml').async('string')
     ]).then(([stylesXml, sheetXml])=>{
-      // 修改 styles.xml: 添加蓝/红色字体
+      // 修改 styles.xml: 加字体、填充、边框、格式组合
       let s = stylesXml
-      // 添加字体（索引2=蓝，3=红）
+      // 字体: 0默认 1粗体(表头) 2蓝色 3红色
       s = s.replace('</fonts>',
+        `<font><b/><sz val="11"/><name val="Calibri"/><color rgb="FF000000"/></font>`+
         `<font><sz val="11"/><name val="Calibri"/><color rgb="FF0066CC"/></font>`+
         `<font><sz val="11"/><name val="Calibri"/><color rgb="FFCC0000"/></font></fonts>`)
-      // 更新 cellXfs 数量
-      const xfMatch = s.match(/<cellXfs[^>]*>/)
-      if(xfMatch){
-        // 保留原0号样式，新增3个：0=默认 1=默认 2=蓝 3=红
-        s = s.replace(/<cellXfs[^>]*>[\s\S]*?<\/cellXfs>/,
-          `<cellXfs count="4">`+
-          `<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>`+
-          `<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>`+
-          `<xf numFmtId="0" fontId="2" fillId="0" borderId="0"/>`+
-          `<xf numFmtId="0" fontId="3" fillId="0" borderId="0"/>`+
-          `</cellXfs>`)
-      }
 
-      // 修改 sheet: 列宽 + 颜色样式
+      // 填充: 0无 1gray125 2表头(#D9E2F3) 3隔行(#F4F6FB)
+      s = s.replace('</fills>',
+        `<fill><patternFill patternType="solid"><fgColor rgb="FFD9E2F3"/></patternFill></fill>`+
+        `<fill><patternFill patternType="solid"><fgColor rgb="FFF4F6FB"/></patternFill></fill></fills>`)
+
+      // 边框: 0无 1细边框
+      s = s.replace('</borders>',
+        `<border><left style="thin"><color auto="1"/></left>`+
+        `<right style="thin"><color auto="1"/></right>`+
+        `<top style="thin"><color auto="1"/></top>`+
+        `<bottom style="thin"><color auto="1"/></bottom></border></borders>`)
+
+      // cellXfs: 0默认 1表头 2偶数行 3奇数行 4偶数+蓝色 5奇数+蓝色 6偶数+红色 7奇数+红色
+      const xfCount=s.match(/count="(\d+)"/)
+      const oldCount=xfCount?parseInt(xfCount[1]):1
+      s = s.replace(/<cellXfs[^>]*>[\s\S]*?<\/cellXfs>/,
+        `<cellXfs count="8">`+
+        `<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>`+   // 0 默认
+        `<xf numFmtId="0" fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/>`+  // 1 表头
+        `<xf numFmtId="0" fontId="0" fillId="3" borderId="1" applyFill="1" applyBorder="1"/>`+  // 2 偶数行
+        `<xf numFmtId="0" fontId="0" fillId="0" borderId="1" applyBorder="1"/>`+  // 3 奇数行
+        `<xf numFmtId="0" fontId="2" fillId="3" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/>`+  // 4 偶数+蓝
+        `<xf numFmtId="0" fontId="2" fillId="0" borderId="1" applyFont="1" applyBorder="1"/>`+  // 5 奇数+蓝
+        `<xf numFmtId="0" fontId="3" fillId="3" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/>`+  // 6 偶数+红
+        `<xf numFmtId="0" fontId="3" fillId="0" borderId="1" applyFont="1" applyBorder="1"/>`+  // 7 奇数+红
+        `</cellXfs>`)
+
+      // 修改 sheet: 列宽 + 冻结 + 筛选 + 样式
       const parser=new DOMParser()
       const doc=parser.parseFromString(sheetXml,'text/xml')
+      const ns=doc.documentElement.namespaceURI
+      const rootEl=doc.documentElement
       const xrows=doc.querySelectorAll('row')
+      const totalCols=xrows.length>0?doc.querySelectorAll('row')[0].querySelectorAll('c').length:0
 
-      // 计算列宽
+      // ① 列宽
       const colWidths={}
       for(let i=0;i<xrows.length;i++){
         const cells=xrows[i].querySelectorAll('c')
@@ -499,8 +518,6 @@ function downloadResult() {
           colWidths[colLetter]=Math.max(colWidths[colLetter]||0, Math.min(len+3, 50))
         }
       }
-      // 插入列宽（用正确的命名空间）
-      const ns=doc.documentElement.namespaceURI
       const sheetData=doc.querySelector('sheetData')
       if(sheetData && Object.keys(colWidths).length && ns){
         const cols=doc.createElementNS(ns,'cols')
@@ -516,21 +533,52 @@ function downloadResult() {
         sheetData.parentNode.insertBefore(cols, sheetData)
       }
 
-      // 给料号列加颜色样式
-      for(let i=1;i<xrows.length;i++){
-        const info=S.result[i-1]
-        if(!info||!info.method) continue
-        let sId=0
-        if(info.method.includes('规格')) sId=2
-        else if(info.method.includes('模糊')||info.method.includes('参考料号')) sId=3
-        else continue
-        const cells=xrows[i].querySelectorAll('c')
-        for(const c of cells){
-          const ref=c.getAttribute('r')||''
-          const col=ref.replace(/[0-9]/g,'')
-          const ci=col.charCodeAt(0)-65
-          if(ci===codeIdx) c.setAttribute('s',String(sId))
+      // ② 冻结首行 + 自动筛选
+      const lastColLetter=totalCols<=26?String.fromCharCode(64+totalCols):
+        String.fromCharCode(64+Math.floor((totalCols-1)/26))+String.fromCharCode(65+(totalCols-1)%26)
+      const lastRow=xrows.length
+
+      // 删掉已有的 sheetViews
+      const oldSv=doc.querySelector('sheetViews')
+      if(oldSv) oldSv.parentNode.removeChild(oldSv)
+
+      const sv=doc.createElementNS(ns,'sheetViews')
+      const sw=doc.createElementNS(ns,'sheetView')
+      sw.setAttribute('tabSelected','1')
+      sw.setAttribute('workbookViewId','0')
+      const pane=doc.createElementNS(ns,'pane')
+      pane.setAttribute('ySplit','1')
+      pane.setAttribute('topLeftCell','A2')
+      pane.setAttribute('activePane','bottomLeft')
+      pane.setAttribute('state','frozen')
+      sw.appendChild(pane)
+      sv.appendChild(sw)
+
+      // 插到 sheetData 前面
+      if(sheetData) sheetData.parentNode.insertBefore(sv, sheetData)
+
+      // 自动筛选
+      const oldAf=doc.querySelector('autoFilter')
+      if(oldAf) oldAf.parentNode.removeChild(oldAf)
+      const af=doc.createElementNS(ns,'autoFilter')
+      af.setAttribute('ref',`A1:${lastColLetter}${lastRow}`)
+      if(sheetData) sheetData.parentNode.insertBefore(af, sheetData)
+
+      // ③ 给每个格子分配样式
+      for(let i=0;i<xrows.length;i++){
+        const isHeader=(i===0)
+        const isEven=(i%2===0)
+        const info=isHeader?null:S.result[i-1]
+        let baseStyle=isHeader?1:(isEven?2:3)
+
+        // 如果有匹配结果，检查是否需要蓝/红色
+        if(!isHeader && info && info.method){
+          if(info.method.includes('规格')) baseStyle=isEven?4:5
+          else if(info.method.includes('模糊')||info.method.includes('参考料号')) baseStyle=isEven?6:7
         }
+
+        const cells=xrows[i].querySelectorAll('c')
+        for(const c of cells) c.setAttribute('s',String(baseStyle))
       }
       const sheetStr=new XMLSerializer().serializeToString(doc)
 
