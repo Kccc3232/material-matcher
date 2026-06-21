@@ -499,17 +499,16 @@ function downloadResult() {
           colWidths[colLetter]=Math.max(colWidths[colLetter]||0, Math.min(len+3, 50))
         }
       }
-      // 插入列宽（放在 sheetData 前面）
+      // 插入列宽（用正确的命名空间）
+      const ns=doc.documentElement.namespaceURI
       const sheetData=doc.querySelector('sheetData')
-      if(sheetData && Object.keys(colWidths).length){
-        const cols=doc.createElementNS('','cols')
-        for(const letter of Object.keys(colWidths).sort((a,b)=>{
-          if(a.length!==b.length) return a.length-b.length
-          return a.localeCompare(b)
-        })){
-          const col=doc.createElementNS('','col')
-          col.setAttribute('min',String(letter.charCodeAt(0)-64))
-          col.setAttribute('max',String(letter.charCodeAt(0)-64))
+      if(sheetData && Object.keys(colWidths).length && ns){
+        const cols=doc.createElementNS(ns,'cols')
+        for(const letter of Object.keys(colWidths)){
+          const colIndex=letter.split('').reduce((sum,ch)=>sum*26+ch.charCodeAt(0)-64,0)
+          const col=doc.createElementNS(ns,'col')
+          col.setAttribute('min',String(colIndex))
+          col.setAttribute('max',String(colIndex))
           col.setAttribute('width',String(colWidths[letter]))
           col.setAttribute('customWidth','1')
           cols.appendChild(col)
