@@ -373,18 +373,19 @@ async function startMatch() {
   const condStr=condRoles.join('/')||'（无条件）'
   log(`🔍 匹配中（目标: ${targetField} | 条件: ${condStr} | 模糊: ${fuzzyOn?'开':'关'}）`,'hl')
 
-  // 构建索引
-  const ni={}, si={}, ri={}, svi={}  // 品名/规格组合/参考料号/单独规格值
-  const mn=mc['品名'], ms=mc['规格'], mr=mc['参考料号']
-  const combinedCol=(tc['规格']&&tc['参考料号']&&tc['规格']===tc['参考料号'])
-
+  // 构建索引（每种条件独立索引）
+  const mn=mc['品名'], ms=mc['规格'], mr=mc['参考料号'], mcode=mc['料号']
+  const ni={}, si={}, svi={}, ri={}, ci={}
+  // 品名→目标  / (品名+规格)→目标  / 规格→目标  / 参考料号→目标  / 料号→目标
   for(const r of m){
     const n=String(r[mn]||'').trim(), s=String(r[ms]||'').trim()
-    const ref=String(r[mr]||'').trim(), c=String(r[mTargetCol]||'').trim()
-    if(n&&c&&condRoles.includes('品名')) ni[n]=c
-    if(n&&s&&c&&condRoles.includes('规格')) si[n+'|'+s]=c
-    if(ref&&c&&condRoles.includes('参考料号')) ri[ref]=c
-    if(s&&c) svi[s]=c
+    const ref=String(r[mr]||'').trim(), code=String(r[mcode]||'').trim()
+    const t=String(r[mTargetCol]||'').trim()
+    if(n&&t&&condRoles.includes('品名')) ni[n]=t
+    if(n&&s&&t&&condRoles.includes('规格')) si[n+'|'+s]=t
+    if(s&&t&&condRoles.includes('规格')) svi[s]=t
+    if(ref&&t&&condRoles.includes('参考料号')) ri[ref]=t
+    if(code&&t&&condRoles.includes('料号')) ci[code]=t
   }
   const nk=Object.keys(ni)
 
@@ -396,19 +397,20 @@ async function startMatch() {
     const vn=String(r[tc['品名']||'']||'').trim()
     const vs=String(r[tc['规格']||'']||'').trim()
     const vr=String(r[tc['参考料号']||'']||'').trim()
+    const vc=String(r[tc['料号']||'']||'').trim()
     let code='', method=''
 
-    // ① 品名精确
+    // ① 品名匹配（单独值）
     if(!code&&condRoles.includes('品名')&&vn&&ni[vn]){code=ni[vn];method='品名匹配'}
-    // ② 规格（品名+规格组合）
+    // ② 规格匹配（品名+规格组合）
     if(!code&&condRoles.includes('规格')&&vn&&vs&&si[vn+'|'+vs]){code=si[vn+'|'+vs];method='规格匹配'}
-    // ③ 合并列：单独用值试规格
-    if(!code&&combinedCol&&vs&&svi[vs]){code=svi[vs];method='规格匹配'}
-    // ④ 合并列：单独用值试参考料号
-    if(!code&&combinedCol&&vr&&ri[vr]){code=ri[vr];method='参考料号匹配'}
-    // ⑤ 非合并列：参考料号
-    if(!code&&!combinedCol&&condRoles.includes('参考料号')&&vr&&ri[vr]){code=ri[vr];method='参考料号匹配'}
-    // ⑥ 模糊
+    // ③ 规格匹配（单独值）
+    if(!code&&condRoles.includes('规格')&&vs&&svi[vs]){code=svi[vs];method='规格匹配'}
+    // ④ 参考料号匹配
+    if(!code&&condRoles.includes('参考料号')&&vr&&ri[vr]){code=ri[vr];method='参考料号匹配'}
+    // ⑤ 料号匹配（单独值）
+    if(!code&&condRoles.includes('料号')&&vc&&ci[vc]){code=ci[vc];method='料号匹配'}
+    // ⑥ 模糊匹配
     if(!code&&fuzzyOn&&condRoles.includes('品名')&&vn&&nk.length){const b=fuzzy(vn,nk);if(b){code=ni[b.match];method=`模糊匹配(${b.score}%)`;fcnt++}}
 
     result.push({row:r,code,method})
